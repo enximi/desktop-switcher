@@ -2,7 +2,7 @@ use std::mem::size_of;
 
 use windows::{
     Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+        Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             Shell::{
@@ -10,10 +10,12 @@ use windows::{
                 NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
             },
             WindowsAndMessaging::{
-                CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
-                GetMessageW, HICON, IDI_APPLICATION, LoadIconW, MSG, MessageBoxW, PostQuitMessage,
-                RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_DESTROY, WM_USER, WNDCLASSW,
-                WS_OVERLAPPEDWINDOW,
+                AppendMenuW, CS_HREDRAW, CS_VREDRAW, CreatePopupMenu, CreateWindowExW,
+                DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
+                GetMessageW, HICON, HMENU, LoadIconW, MF_STRING, MSG, MessageBoxW, PostMessageW,
+                PostQuitMessage, RegisterClassW, SetForegroundWindow, TPM_RETURNCMD,
+                TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE, WM_CONTEXTMENU,
+                WM_DESTROY, WM_NULL, WM_RBUTTONUP, WM_USER, WNDCLASSW, WS_OVERLAPPEDWINDOW,
             },
         },
     },
@@ -22,7 +24,9 @@ use windows::{
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("DesktopSwitcherTrayWindow");
 const TRAY_TOOLTIP: &str = "desktop-switcher";
+const APP_ICON_ID: u16 = 1;
 const TRAY_ICON_ID: u32 = 1;
+const MENU_EXIT_ID: usize = 100;
 const WM_TRAY_ICON: u32 = WM_USER + 1;
 
 pub fn run() -> Result<()> {
@@ -114,7 +118,7 @@ impl HiddenWindow {
 impl Drop for HiddenWindow {
     fn drop(&mut self) {
         unsafe {
-            let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(self.hwnd);
+            let _ = DestroyWindow(self.hwnd);
         }
     }
 }
@@ -126,7 +130,8 @@ struct TrayIcon {
 
 impl TrayIcon {
     fn add(hwnd: HWND) -> Result<Self> {
-        let icon = unsafe { LoadIconW(None, IDI_APPLICATION)? };
+        let instance = unsafe { GetModuleHandleW(None)? };
+        let icon = unsafe { LoadIconW(Some(instance.into()), int_resource(APP_ICON_ID))? };
 
         let mut data = tray_icon_data(hwnd, icon);
         set_tip(&mut data, TRAY_TOOLTIP);
@@ -148,6 +153,10 @@ impl TrayIcon {
 
         Ok(Self { hwnd, icon })
     }
+}
+
+fn int_resource(id: u16) -> PCWSTR {
+    PCWSTR(id as usize as *const u16)
 }
 
 impl Drop for TrayIcon {
@@ -179,6 +188,60 @@ fn set_tip(data: &mut NOTIFYICONDATAW, tip: &str) {
     }
 }
 
+fn show_context_menu(hwnd: HWND) -> Result<()> {
+    let menu = PopupMenu::create()?;
+    let mut cursor = POINT::default();
+
+    unsafe {
+        GetCursorPos(&mut cursor)?;
+        let _ = SetForegroundWindow(hwnd);
+
+        let selected = TrackPopupMenu(
+            menu.handle,
+            TPM_RIGHTBUTTON | TPM_RETURNCMD,
+            cursor.x,
+            cursor.y,
+            None,
+            hwnd,
+            None,
+        );
+        let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
+
+        if selected.0 as usize == MENU_EXIT_ID {
+            DestroyWindow(hwnd)?;
+        }
+    }
+
+    Ok(())
+}
+
+struct PopupMenu {
+    handle: HMENU,
+}
+
+impl PopupMenu {
+    fn create() -> Result<Self> {
+        let handle = unsafe { CreatePopupMenu()? };
+        unsafe {
+            AppendMenuW(handle, MF_STRING, MENU_EXIT_ID, w!("退出"))?;
+        }
+
+        Ok(Self { handle })
+    }
+}
+
+impl Drop for PopupMenu {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyMenu(self.handle);
+        }
+    }
+}
+
+fn low_word(value: isize) -> u32 {
+    (value as u32) & 0xffff
+}
+
 extern "system" fn window_proc(
     hwnd: HWND,
     message: u32,
@@ -186,6 +249,12 @@ extern "system" fn window_proc(
     l_param: LPARAM,
 ) -> LRESULT {
     match message {
+        WM_TRAY_ICON
+            if low_word(l_param.0) == WM_CONTEXTMENU || low_word(l_param.0) == WM_RBUTTONUP =>
+        {
+            let _ = show_context_menu(hwnd);
+            LRESULT(0)
+        }
         WM_DESTROY => {
             unsafe {
                 PostQuitMessage(0);
