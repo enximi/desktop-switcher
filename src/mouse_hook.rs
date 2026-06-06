@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use windows::{
     Win32::{
@@ -17,6 +17,7 @@ use crate::{
 };
 
 static EDGE_WIDTH_PX: AtomicI32 = AtomicI32::new(4);
+static ENABLED: AtomicBool = AtomicBool::new(true);
 
 pub fn install(edge_width_px: i32) -> Result<HookGuard> {
     EDGE_WIDTH_PX.store(edge_width_px, Ordering::Relaxed);
@@ -26,8 +27,16 @@ pub fn install(edge_width_px: i32) -> Result<HookGuard> {
     Ok(HookGuard(hook))
 }
 
+pub fn is_enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+pub fn set_enabled(enabled: bool) {
+    ENABLED.store(enabled, Ordering::Relaxed);
+}
+
 unsafe extern "system" fn mouse_proc(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
-    if code == HC_ACTION as i32 {
+    if code == HC_ACTION as i32 && is_enabled() {
         let event = unsafe { &*(l_param.0 as *const MSLLHOOKSTRUCT) };
         let edge_width_px = EDGE_WIDTH_PX.load(Ordering::Relaxed);
 

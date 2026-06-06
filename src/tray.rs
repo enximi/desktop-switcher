@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use crate::startup;
+use crate::{mouse_hook, startup};
 
 use windows::{
     Win32::{
@@ -14,11 +14,11 @@ use windows::{
             WindowsAndMessaging::{
                 AppendMenuW, CS_HREDRAW, CS_VREDRAW, CreatePopupMenu, CreateWindowExW,
                 DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
-                GetMessageW, HICON, HMENU, LoadIconW, MF_CHECKED, MF_STRING, MF_UNCHECKED, MSG,
-                MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow,
-                TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE,
-                WM_CONTEXTMENU, WM_DESTROY, WM_NULL, WM_RBUTTONUP, WM_USER, WNDCLASSW,
-                WS_OVERLAPPEDWINDOW,
+                GetMessageW, HICON, HMENU, LoadIconW, MF_CHECKED, MF_SEPARATOR, MF_STRING,
+                MF_UNCHECKED, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW,
+                SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+                TranslateMessage, WINDOW_EX_STYLE, WM_CONTEXTMENU, WM_DESTROY, WM_NULL,
+                WM_RBUTTONUP, WM_USER, WNDCLASSW, WS_OVERLAPPEDWINDOW,
             },
         },
     },
@@ -29,6 +29,7 @@ const WINDOW_CLASS_NAME: PCWSTR = w!("DesktopSwitcherTrayWindow");
 const TRAY_TOOLTIP: &str = "desktop-switcher";
 const APP_ICON_ID: u16 = 1;
 const TRAY_ICON_ID: u32 = 1;
+const MENU_EDGE_WHEEL_SWITCHING_ID: usize = 98;
 const MENU_STARTUP_ID: usize = 99;
 const MENU_EXIT_ID: usize = 100;
 const WM_TRAY_ICON: u32 = WM_USER + 1;
@@ -212,6 +213,7 @@ fn show_context_menu(hwnd: HWND) -> Result<()> {
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
 
         match selected.0 as usize {
+            MENU_EDGE_WHEEL_SWITCHING_ID => toggle_edge_wheel_switching(),
             MENU_STARTUP_ID => toggle_startup()?,
             MENU_EXIT_ID => DestroyWindow(hwnd)?,
             _ => {}
@@ -219,6 +221,10 @@ fn show_context_menu(hwnd: HWND) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn toggle_edge_wheel_switching() {
+    mouse_hook::set_enabled(!mouse_hook::is_enabled());
 }
 
 fn toggle_startup() -> Result<()> {
@@ -240,6 +246,12 @@ struct PopupMenu {
 impl PopupMenu {
     fn create() -> Result<Self> {
         let handle = unsafe { CreatePopupMenu()? };
+        let switching_enabled = mouse_hook::is_enabled();
+        let switching_flags = if switching_enabled {
+            MF_STRING | MF_CHECKED
+        } else {
+            MF_STRING | MF_UNCHECKED
+        };
         let startup_enabled = startup::is_enabled().unwrap_or(false);
         let startup_flags = if startup_enabled {
             MF_STRING | MF_CHECKED
@@ -248,7 +260,14 @@ impl PopupMenu {
         };
 
         unsafe {
+            AppendMenuW(
+                handle,
+                switching_flags,
+                MENU_EDGE_WHEEL_SWITCHING_ID,
+                w!("边缘滚轮切换"),
+            )?;
             AppendMenuW(handle, startup_flags, MENU_STARTUP_ID, w!("开机自启"))?;
+            AppendMenuW(handle, MF_SEPARATOR, 0, PCWSTR::null())?;
             AppendMenuW(handle, MF_STRING, MENU_EXIT_ID, w!("退出"))?;
         }
 

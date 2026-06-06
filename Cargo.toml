@@ -2,6 +2,7 @@
 name = "desktop-switcher"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 windows = { version = "0.62.2", features = [
