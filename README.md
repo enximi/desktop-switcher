@@ -1,0 +1,82 @@
+# desktop-switcher
+
+一个 Windows 虚拟桌面快捷切换工具。
+
+当前版本提供一种操作方式：把鼠标移动到屏幕左边缘，然后使用滚轮切换虚拟桌面。
+
+## 功能
+
+- 启动后只显示一个系统托盘图标，不显示主窗口或控制台窗口。
+- 鼠标位于屏幕左边缘 `4px` 触发区内时，监听滚轮操作。
+- 滚轮向上：切换到左侧虚拟桌面。
+- 滚轮向下：切换到右侧虚拟桌面。
+- 支持多显示器：按鼠标当前所在显示器的左边缘判断。
+- 内置 `250ms` 节流，避免滚轮惯性导致一次跳过多个桌面。
+- 触发区内的滚轮事件会被拦截，避免同时滚动当前窗口。
+
+## 技术实现
+
+项目使用 Rust 编写，通过 `windows` crate 调用 Win32 API：
+
+- `SetWindowsHookExW` + `WH_MOUSE_LL`：注册全局低级鼠标钩子。
+- `WM_MOUSEWHEEL`：捕获全局滚轮事件。
+- `MonitorFromPoint` + `GetMonitorInfoW`：判断鼠标是否位于当前显示器左边缘。
+- `SendInput`：模拟 Windows 虚拟桌面快捷键。
+- `Shell_NotifyIconW`：注册系统托盘图标。
+
+桌面切换目前通过模拟系统快捷键实现：
+
+- `Ctrl + Win + Left`
+- `Ctrl + Win + Right`
+
+## 使用
+
+运行：
+
+```powershell
+cargo run
+```
+
+启动后程序进入后台，只显示系统托盘图标。然后：
+
+1. 把鼠标移动到屏幕最左边缘。
+2. 滚动鼠标滚轮。
+
+## 构建
+
+```powershell
+cargo build --release
+```
+
+构建产物位于：
+
+```text
+target/release/desktop-switcher.exe
+```
+
+## 当前限制
+
+- 触发边缘宽度、节流时间和触发边缘还没有配置文件。
+- 暂未提供开机自启、暂停/启用开关和托盘菜单。
+- 虚拟桌面切换依赖 Windows 默认快捷键，而不是直接调用虚拟桌面内部 COM API。
+
+## 开发
+
+常用检查命令：
+
+```powershell
+cargo fmt --check
+cargo build
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+## 代码结构
+
+```text
+src/
+  main.rs             程序入口
+  tray.rs             隐藏消息窗口和系统托盘图标
+  mouse_hook.rs       全局鼠标钩子、滚轮处理和节流
+  screen_edge.rs      屏幕边缘检测
+  desktop_switch.rs   虚拟桌面切换快捷键模拟
+```
