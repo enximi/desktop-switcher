@@ -3,7 +3,7 @@ use std::mem::size_of;
 use windows::{
     Win32::UI::Input::KeyboardAndMouse::{
         INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
-        VIRTUAL_KEY, VK_CONTROL, VK_LEFT, VK_LWIN, VK_RIGHT,
+        VIRTUAL_KEY, VK_CONTROL, VK_LEFT, VK_LWIN, VK_RIGHT, VK_TAB,
     },
     core::{Error, Result},
 };
@@ -20,16 +20,27 @@ pub fn switch_desktop(direction: Direction) -> Result<()> {
         Direction::Right => VK_RIGHT,
     };
 
-    let inputs = [
+    send_key_sequence(&[
         key_down(VK_CONTROL),
         key_down(VK_LWIN),
         key_down(arrow_key),
         key_up(arrow_key),
         key_up(VK_LWIN),
         key_up(VK_CONTROL),
-    ];
+    ])
+}
 
-    let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
+pub fn show_task_view() -> Result<()> {
+    send_key_sequence(&[
+        key_down(VK_LWIN),
+        key_down(VK_TAB),
+        key_up(VK_TAB),
+        key_up(VK_LWIN),
+    ])
+}
+
+fn send_key_sequence(inputs: &[INPUT]) -> Result<()> {
+    let sent = unsafe { SendInput(inputs, size_of::<INPUT>() as i32) };
 
     if sent == inputs.len() as u32 {
         Ok(())
