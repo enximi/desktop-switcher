@@ -3,6 +3,7 @@
 mod desktop_switch;
 mod mouse_hook;
 mod screen_edge;
+mod startup;
 mod tray;
 
 const EDGE_WIDTH_PX: i32 = 4;

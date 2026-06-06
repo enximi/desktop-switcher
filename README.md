@@ -14,7 +14,7 @@
 - 按下滚轮：打开 Windows 多任务视图。
 - 支持多显示器：按鼠标当前所在显示器的左边缘判断。
 - 触发区内的滚轮事件和滚轮按下事件会被拦截，避免同时影响当前窗口。
-- 托盘图标右键菜单提供“退出”。
+- 托盘图标右键菜单提供“开机自启”和“退出”。
 
 ## 技术实现
 
@@ -26,6 +26,7 @@
 - `MonitorFromPoint` + `GetMonitorInfoW`：判断鼠标是否位于当前显示器左边缘。
 - `SendInput`：模拟 Windows 虚拟桌面快捷键。
 - `Shell_NotifyIconW`：注册系统托盘图标。
+- `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`：保存当前用户的开机自启设置。
 
 桌面切换目前通过模拟系统快捷键实现：
 
@@ -55,6 +56,12 @@ cargo run
 1. 右键点击系统托盘图标。
 2. 点击“退出”。
 
+开机自启：
+
+1. 右键点击系统托盘图标。
+2. 点击“开机自启”切换启用状态。
+3. 菜单项带勾时表示已启用。
+
 ## 构建
 
 ```powershell
@@ -70,7 +77,7 @@ target/release/desktop-switcher.exe
 ## 当前限制
 
 - 触发边缘宽度和触发边缘还没有配置文件。
-- 暂未提供开机自启和暂停/启用开关。
+- 暂未提供暂停/启用开关。
 - 虚拟桌面切换依赖 Windows 默认快捷键，而不是直接调用虚拟桌面内部 COM API。
 
 ## 开发
@@ -89,6 +96,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 src/
   main.rs             程序入口
   tray.rs             隐藏消息窗口和系统托盘图标
+  startup.rs          当前用户开机自启注册表设置
   mouse_hook.rs       全局鼠标钩子、滚轮和滚轮按下处理
   screen_edge.rs      屏幕边缘检测
   desktop_switch.rs   虚拟桌面切换快捷键模拟

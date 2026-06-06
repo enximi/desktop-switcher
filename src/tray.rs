@@ -1,5 +1,7 @@
 use std::mem::size_of;
 
+use crate::startup;
+
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
@@ -12,10 +14,11 @@ use windows::{
             WindowsAndMessaging::{
                 AppendMenuW, CS_HREDRAW, CS_VREDRAW, CreatePopupMenu, CreateWindowExW,
                 DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
-                GetMessageW, HICON, HMENU, LoadIconW, MF_STRING, MSG, MessageBoxW, PostMessageW,
-                PostQuitMessage, RegisterClassW, SetForegroundWindow, TPM_RETURNCMD,
-                TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE, WM_CONTEXTMENU,
-                WM_DESTROY, WM_NULL, WM_RBUTTONUP, WM_USER, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+                GetMessageW, HICON, HMENU, LoadIconW, MF_CHECKED, MF_STRING, MF_UNCHECKED, MSG,
+                MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow,
+                TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE,
+                WM_CONTEXTMENU, WM_DESTROY, WM_NULL, WM_RBUTTONUP, WM_USER, WNDCLASSW,
+                WS_OVERLAPPEDWINDOW,
             },
         },
     },
@@ -26,6 +29,7 @@ const WINDOW_CLASS_NAME: PCWSTR = w!("DesktopSwitcherTrayWindow");
 const TRAY_TOOLTIP: &str = "desktop-switcher";
 const APP_ICON_ID: u16 = 1;
 const TRAY_ICON_ID: u32 = 1;
+const MENU_STARTUP_ID: usize = 99;
 const MENU_EXIT_ID: usize = 100;
 const WM_TRAY_ICON: u32 = WM_USER + 1;
 
@@ -207,9 +211,23 @@ fn show_context_menu(hwnd: HWND) -> Result<()> {
         );
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
 
-        if selected.0 as usize == MENU_EXIT_ID {
-            DestroyWindow(hwnd)?;
+        match selected.0 as usize {
+            MENU_STARTUP_ID => toggle_startup()?,
+            MENU_EXIT_ID => DestroyWindow(hwnd)?,
+            _ => {}
         }
+    }
+
+    Ok(())
+}
+
+fn toggle_startup() -> Result<()> {
+    let result = startup::is_enabled()
+        .and_then(|currently_enabled| startup::set_enabled(!currently_enabled));
+
+    if let Err(error) = result {
+        show_startup_error(&format!("开机自启设置失败: {error}"));
+        return Err(error);
     }
 
     Ok(())
@@ -222,7 +240,15 @@ struct PopupMenu {
 impl PopupMenu {
     fn create() -> Result<Self> {
         let handle = unsafe { CreatePopupMenu()? };
+        let startup_enabled = startup::is_enabled().unwrap_or(false);
+        let startup_flags = if startup_enabled {
+            MF_STRING | MF_CHECKED
+        } else {
+            MF_STRING | MF_UNCHECKED
+        };
+
         unsafe {
+            AppendMenuW(handle, startup_flags, MENU_STARTUP_ID, w!("开机自启"))?;
             AppendMenuW(handle, MF_STRING, MENU_EXIT_ID, w!("退出"))?;
         }
 
