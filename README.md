@@ -1,5 +1,9 @@
 # desktop-switcher
 
+<p align="center">
+  <img src="assets/desktop-switcher-icon.png" alt="desktop-switcher icon" width="128" height="128">
+</p>
+
 一个 Windows 虚拟桌面快捷切换工具。
 
 当前版本提供两种操作方式：把鼠标移动到屏幕左边缘后使用滚轮，或按住鼠标右键后使用滚轮。
