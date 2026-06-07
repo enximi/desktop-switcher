@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use crate::{mouse_hook, startup};
+use crate::{config, mouse_hook, startup};
 
 use windows::{
     Win32::{
@@ -30,6 +30,7 @@ const TRAY_TOOLTIP: &str = "desktop-switcher";
 const APP_ICON_ID: u16 = 1;
 const TRAY_ICON_ID: u32 = 1;
 const MENU_EDGE_WHEEL_SWITCHING_ID: usize = 98;
+const MENU_RIGHT_BUTTON_GESTURES_ID: usize = 97;
 const MENU_STARTUP_ID: usize = 99;
 const MENU_EXIT_ID: usize = 100;
 const WM_TRAY_ICON: u32 = WM_USER + 1;
@@ -214,6 +215,7 @@ fn show_context_menu(hwnd: HWND) -> Result<()> {
 
         match selected.0 as usize {
             MENU_EDGE_WHEEL_SWITCHING_ID => toggle_edge_wheel_switching(),
+            MENU_RIGHT_BUTTON_GESTURES_ID => toggle_right_button_gestures(),
             MENU_STARTUP_ID => toggle_startup()?,
             MENU_EXIT_ID => DestroyWindow(hwnd)?,
             _ => {}
@@ -224,7 +226,24 @@ fn show_context_menu(hwnd: HWND) -> Result<()> {
 }
 
 fn toggle_edge_wheel_switching() {
-    mouse_hook::set_enabled(!mouse_hook::is_enabled());
+    let mut settings = mouse_hook::feature_settings();
+    settings.edge_wheel_switching_enabled = !settings.edge_wheel_switching_enabled;
+    save_feature_settings(settings);
+}
+
+fn toggle_right_button_gestures() {
+    let mut settings = mouse_hook::feature_settings();
+    settings.right_button_gestures_enabled = !settings.right_button_gestures_enabled;
+    save_feature_settings(settings);
+}
+
+fn save_feature_settings(settings: config::FeatureSettings) {
+    if let Err(error) = config::save(&settings) {
+        show_startup_error(&format!("配置保存失败: {error}"));
+        return;
+    }
+
+    mouse_hook::apply_feature_settings(settings);
 }
 
 fn toggle_startup() -> Result<()> {
@@ -246,8 +265,14 @@ struct PopupMenu {
 impl PopupMenu {
     fn create() -> Result<Self> {
         let handle = unsafe { CreatePopupMenu()? };
-        let switching_enabled = mouse_hook::is_enabled();
+        let switching_enabled = mouse_hook::is_edge_wheel_switching_enabled();
         let switching_flags = if switching_enabled {
+            MF_STRING | MF_CHECKED
+        } else {
+            MF_STRING | MF_UNCHECKED
+        };
+        let right_button_gestures_enabled = mouse_hook::is_right_button_gestures_enabled();
+        let right_button_gestures_flags = if right_button_gestures_enabled {
             MF_STRING | MF_CHECKED
         } else {
             MF_STRING | MF_UNCHECKED
@@ -265,6 +290,12 @@ impl PopupMenu {
                 switching_flags,
                 MENU_EDGE_WHEEL_SWITCHING_ID,
                 w!("边缘滚轮切换"),
+            )?;
+            AppendMenuW(
+                handle,
+                right_button_gestures_flags,
+                MENU_RIGHT_BUTTON_GESTURES_ID,
+                w!("按住右键触发"),
             )?;
             AppendMenuW(handle, startup_flags, MENU_STARTUP_ID, w!("开机自启"))?;
             AppendMenuW(handle, MF_SEPARATOR, 0, PCWSTR::null())?;

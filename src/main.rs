@@ -1,5 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod config;
 mod desktop_switch;
 mod mouse_hook;
 mod screen_edge;
@@ -15,7 +16,12 @@ fn main() {
     }
 }
 
-fn run() -> windows::core::Result<()> {
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let settings = config::load_or_create()?;
+    mouse_hook::apply_feature_settings(settings);
+
     let _hook = mouse_hook::install(EDGE_WIDTH_PX)?;
-    tray::run()
+    tray::run()?;
+
+    Ok(())
 }
