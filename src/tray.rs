@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use crate::{config, mouse_hook, startup};
+use crate::{config, desktop_switch, error_dialog, mouse_hook, startup};
 
 use windows::{
     Win32::{
@@ -15,14 +15,14 @@ use windows::{
                 AppendMenuW, CS_HREDRAW, CS_VREDRAW, CreatePopupMenu, CreateWindowExW,
                 DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
                 GetMessageW, HICON, HMENU, LoadIconW, MF_CHECKED, MF_SEPARATOR, MF_STRING,
-                MF_UNCHECKED, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW,
+                MF_UNCHECKED, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
                 SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
                 TranslateMessage, WINDOW_EX_STYLE, WM_CONTEXTMENU, WM_DESTROY, WM_NULL,
                 WM_RBUTTONUP, WM_USER, WNDCLASSW, WS_OVERLAPPEDWINDOW,
             },
         },
     },
-    core::{Error, HSTRING, PCWSTR, Result, w},
+    core::{Error, PCWSTR, Result, w},
 };
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("DesktopSwitcherTrayWindow");
@@ -30,33 +30,32 @@ const TRAY_TOOLTIP: &str = "desktop-switcher";
 const APP_ICON_ID: u16 = 1;
 const TRAY_ICON_ID: u32 = 1;
 const MENU_EDGE_WHEEL_SWITCHING_ID: usize = 98;
-const MENU_RIGHT_BUTTON_GESTURES_ID: usize = 97;
 const MENU_STARTUP_ID: usize = 99;
 const MENU_EXIT_ID: usize = 100;
 const WM_TRAY_ICON: u32 = WM_USER + 1;
 
-pub fn run() -> Result<()> {
-    let window = HiddenWindow::create()?;
-    let tray_icon = TrayIcon::add(window.hwnd)?;
-
-    let result = run_message_loop();
-
-    drop(tray_icon);
-    drop(window);
-
-    result
+pub struct Tray {
+    _icon: TrayIcon,
+    window: HiddenWindow,
 }
 
-pub fn show_startup_error(message: &str) {
-    let message = HSTRING::from(message);
+impl Tray {
+    pub fn create() -> Result<Self> {
+        let window = HiddenWindow::create()?;
+        let icon = TrayIcon::add(window.hwnd)?;
 
-    unsafe {
-        MessageBoxW(
-            None,
-            &message,
-            w!("desktop-switcher"),
-            windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR,
-        );
+        Ok(Self {
+            _icon: icon,
+            window,
+        })
+    }
+
+    pub fn command_target(&self) -> HWND {
+        self.window.hwnd
+    }
+
+    pub fn run_message_loop(&self) -> Result<()> {
+        run_message_loop()
     }
 }
 
@@ -196,14 +195,57 @@ fn set_tip(data: &mut NOTIFYICONDATAW, tip: &str) {
 
 fn show_context_menu(hwnd: HWND) -> Result<()> {
     let menu = PopupMenu::create()?;
+    if let Some(command) = menu.track_at_cursor(hwnd)? {
+        handle_menu_command(command, hwnd)?;
+    }
+
+    Ok(())
+}
+
+fn handle_menu_command(command: MenuCommand, hwnd: HWND) -> Result<()> {
+    match command {
+        MenuCommand::ToggleEdgeWheelSwitching => toggle_edge_wheel_switching(),
+        MenuCommand::ToggleStartup => toggle_startup()?,
+        MenuCommand::Exit => unsafe {
+            DestroyWindow(hwnd)?;
+        },
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MenuCommand {
+    ToggleEdgeWheelSwitching,
+    ToggleStartup,
+    Exit,
+}
+
+impl MenuCommand {
+    fn from_id(id: usize) -> Option<Self> {
+        match id {
+            MENU_EDGE_WHEEL_SWITCHING_ID => Some(Self::ToggleEdgeWheelSwitching),
+            MENU_STARTUP_ID => Some(Self::ToggleStartup),
+            MENU_EXIT_ID => Some(Self::Exit),
+            _ => None,
+        }
+    }
+}
+
+fn current_cursor_position() -> Result<POINT> {
     let mut cursor = POINT::default();
 
     unsafe {
         GetCursorPos(&mut cursor)?;
-        let _ = SetForegroundWindow(hwnd);
+    }
 
+    Ok(cursor)
+}
+
+fn track_menu(handle: HMENU, hwnd: HWND, cursor: POINT) -> Option<MenuCommand> {
+    unsafe {
         let selected = TrackPopupMenu(
-            menu.handle,
+            handle,
             TPM_RIGHTBUTTON | TPM_RETURNCMD,
             cursor.x,
             cursor.y,
@@ -213,16 +255,8 @@ fn show_context_menu(hwnd: HWND) -> Result<()> {
         );
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
 
-        match selected.0 as usize {
-            MENU_EDGE_WHEEL_SWITCHING_ID => toggle_edge_wheel_switching(),
-            MENU_RIGHT_BUTTON_GESTURES_ID => toggle_right_button_gestures(),
-            MENU_STARTUP_ID => toggle_startup()?,
-            MENU_EXIT_ID => DestroyWindow(hwnd)?,
-            _ => {}
-        }
+        MenuCommand::from_id(selected.0 as usize)
     }
-
-    Ok(())
 }
 
 fn toggle_edge_wheel_switching() {
@@ -231,15 +265,9 @@ fn toggle_edge_wheel_switching() {
     save_feature_settings(settings);
 }
 
-fn toggle_right_button_gestures() {
-    let mut settings = mouse_hook::feature_settings();
-    settings.right_button_gestures_enabled = !settings.right_button_gestures_enabled;
-    save_feature_settings(settings);
-}
-
 fn save_feature_settings(settings: config::FeatureSettings) {
     if let Err(error) = config::save(&settings) {
-        show_startup_error(&format!("配置保存失败: {error}"));
+        error_dialog::show(&format!("配置保存失败: {error}"));
         return;
     }
 
@@ -251,11 +279,31 @@ fn toggle_startup() -> Result<()> {
         .and_then(|currently_enabled| startup::set_enabled(!currently_enabled));
 
     if let Err(error) = result {
-        show_startup_error(&format!("开机自启设置失败: {error}"));
+        error_dialog::show(&format!("开机自启设置失败: {error}"));
         return Err(error);
     }
 
     Ok(())
+}
+
+fn handle_mouse_command(w_param: WPARAM) {
+    let Some(command) = mouse_hook::MouseCommand::from_message_value(w_param.0) else {
+        return;
+    };
+
+    let result = match command {
+        mouse_hook::MouseCommand::SwitchLeft => {
+            desktop_switch::switch_desktop(desktop_switch::Direction::Left)
+        }
+        mouse_hook::MouseCommand::SwitchRight => {
+            desktop_switch::switch_desktop(desktop_switch::Direction::Right)
+        }
+        mouse_hook::MouseCommand::ShowTaskView => desktop_switch::show_task_view(),
+    };
+
+    if let Err(error) = result {
+        eprintln!("鼠标命令执行失败: {error}");
+    }
 }
 
 struct PopupMenu {
@@ -267,12 +315,6 @@ impl PopupMenu {
         let handle = unsafe { CreatePopupMenu()? };
         let switching_enabled = mouse_hook::is_edge_wheel_switching_enabled();
         let switching_flags = if switching_enabled {
-            MF_STRING | MF_CHECKED
-        } else {
-            MF_STRING | MF_UNCHECKED
-        };
-        let right_button_gestures_enabled = mouse_hook::is_right_button_gestures_enabled();
-        let right_button_gestures_flags = if right_button_gestures_enabled {
             MF_STRING | MF_CHECKED
         } else {
             MF_STRING | MF_UNCHECKED
@@ -291,18 +333,22 @@ impl PopupMenu {
                 MENU_EDGE_WHEEL_SWITCHING_ID,
                 w!("边缘滚轮切换"),
             )?;
-            AppendMenuW(
-                handle,
-                right_button_gestures_flags,
-                MENU_RIGHT_BUTTON_GESTURES_ID,
-                w!("按住右键触发"),
-            )?;
             AppendMenuW(handle, startup_flags, MENU_STARTUP_ID, w!("开机自启"))?;
             AppendMenuW(handle, MF_SEPARATOR, 0, PCWSTR::null())?;
             AppendMenuW(handle, MF_STRING, MENU_EXIT_ID, w!("退出"))?;
         }
 
         Ok(Self { handle })
+    }
+
+    fn track_at_cursor(&self, hwnd: HWND) -> Result<Option<MenuCommand>> {
+        let cursor = current_cursor_position()?;
+
+        unsafe {
+            let _ = SetForegroundWindow(hwnd);
+        }
+
+        Ok(track_menu(self.handle, hwnd, cursor))
     }
 }
 
@@ -325,6 +371,10 @@ extern "system" fn window_proc(
     l_param: LPARAM,
 ) -> LRESULT {
     match message {
+        mouse_hook::COMMAND_MESSAGE => {
+            handle_mouse_command(w_param);
+            LRESULT(0)
+        }
         WM_TRAY_ICON
             if low_word(l_param.0) == WM_CONTEXTMENU || low_word(l_param.0) == WM_RBUTTONUP =>
         {

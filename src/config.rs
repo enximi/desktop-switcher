@@ -9,14 +9,12 @@ const CONFIG_FILE_NAME: &str = "config.toml";
 #[serde(deny_unknown_fields)]
 pub struct FeatureSettings {
     pub edge_wheel_switching_enabled: bool,
-    pub right_button_gestures_enabled: bool,
 }
 
 impl Default for FeatureSettings {
     fn default() -> Self {
         Self {
             edge_wheel_switching_enabled: true,
-            right_button_gestures_enabled: true,
         }
     }
 }
@@ -77,7 +75,6 @@ mod tests {
         let settings = load_from_toml(
             "\
 edge_wheel_switching_enabled = false
-right_button_gestures_enabled = true
 ",
         )
         .unwrap();
@@ -86,7 +83,6 @@ right_button_gestures_enabled = true
             settings,
             FeatureSettings {
                 edge_wheel_switching_enabled: false,
-                right_button_gestures_enabled: true,
             }
         );
     }
@@ -96,7 +92,6 @@ right_button_gestures_enabled = true
         let error = load_from_toml(
             "\
 edge_wheel_switching_enabled = true
-right_button_gestures_enabled = true
 extra = true
 ",
         )
@@ -107,9 +102,9 @@ extra = true
 
     #[test]
     fn rejects_missing_keys() {
-        let error = load_from_toml("edge_wheel_switching_enabled = true\n").unwrap_err();
+        let error = load_from_toml("").unwrap_err();
 
-        assert!(error.to_string().contains("right_button_gestures_enabled"));
+        assert!(error.to_string().contains("edge_wheel_switching_enabled"));
     }
 
     fn load_from_toml(
